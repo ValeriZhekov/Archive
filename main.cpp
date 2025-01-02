@@ -40,6 +40,18 @@ std::vector<char> decompressData(const std::vector<char> &compressedData, uLong 
 
     return decompressedData;
 }
+std::string computeHash(const std::vector<char> &data)
+{
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+    SHA256(reinterpret_cast<const unsigned char *>(data.data()), data.size(), hash);
+
+    char buffer[2 * SHA256_DIGEST_LENGTH + 1];
+    for (int i = 0; i < SHA256_DIGEST_LENGTH; ++i)
+    {
+        snprintf(buffer + (i * 2), 3, "%02x", hash[i]);
+    }
+    return std::string(buffer);
+}
 class Storage
 {
     struct FileEntry
@@ -122,6 +134,7 @@ public:
         file.close();
     }
 };
+
 class ArchiveManager {
 private:
     Storage& storage; // reference to storage
@@ -217,18 +230,7 @@ public:
         file.close();
     }
 };
-std::string computeHash(const std::vector<char> &data)
-{
-    unsigned char hash[SHA256_DIGEST_LENGTH];
-    SHA256(reinterpret_cast<const unsigned char *>(data.data()), data.size(), hash);
 
-    char buffer[2 * SHA256_DIGEST_LENGTH + 1];
-    for (int i = 0; i < SHA256_DIGEST_LENGTH; ++i)
-    {
-        snprintf(buffer + (i * 2), 3, "%02x", hash[i]);
-    }
-    return std::string(buffer);
-}
 int main(int argc, char *argv[])
 {
     try {
@@ -282,8 +284,9 @@ int main(int argc, char *argv[])
 
             archiveManager.extractArchive(archiveName, targetPath, paths);
             std::cout << "Archive '" << archiveName << "' extracted to '" << targetPath << "' successfully.\n";
-            storage.saveToFile(storageData);
+            
         }
+        storage.saveToFile(storageData);
         }
         catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << "\n";
