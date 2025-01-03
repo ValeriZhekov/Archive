@@ -133,98 +133,126 @@ public:
 
         file.close();
     }
+    bool fileExists(const std::string &hash) const
+    {
+        return fileTable.find(hash) != fileTable.end();
+    }
 };
 
-class ArchiveManager {
+class ArchiveManager
+{
 private:
-    Storage& storage; // reference to storage
+    Storage &storage;           // reference to storage
     nlohmann::json archiveData; // metadata for all archives
     std::string metadataFile = "archivesMetaData.json";
 
 public:
-    ArchiveManager(Storage& _storage) : storage(_storage) {
+    ArchiveManager(Storage &_storage) : storage(_storage)
+    {
         loadMetadata();
     }
 
-    ~ArchiveManager() {
+    ~ArchiveManager()
+    {
         saveMetadata();
     }
 
-    
-    void createArchive(const std::string& archiveName, const std::vector<std::string>& directories) {
-        if (archiveData.contains(archiveName)) {
+    void createArchive(const std::string &archiveName, const std::vector<std::string> &directories, bool hashOnly)
+    {
+        if (archiveData.contains(archiveName))
+        {
             throw std::runtime_error("Archive with this name already exists");
         }
 
         nlohmann::json archiveContents;
 
-        for (const auto& dir : directories) { //go through all directories
-            for (const auto& entry : std::filesystem::recursive_directory_iterator(dir)) {  //all files in directory
-                if (!entry.is_regular_file()) continue; //skip nonfiles
+        for (const auto &dir : directories)
+        { // go through all directories
+            for (const auto &entry : std::filesystem::recursive_directory_iterator(dir))
+            { // all files in directory
+                if (!entry.is_regular_file())
+                    continue; // skip nonfiles
 
                 std::ifstream file(entry.path(), std::ios::binary);
-                std::vector<char> content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());    //iterator constructor
+                std::vector<char> content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>()); // iterator constructor
                 file.close();
 
                 std::string hash = computeHash(content);
-                storage.addFile(hash, content);
-
-                archiveContents[std::filesystem::relative(entry.path(), dir).string()] = hash; //realtive path of file in directory : file hash,
-                                                                                                // which is the name of the compressed file in data
+                if (hashOnly || !storage.fileExists(hash))
+                {
+                    storage.addFile(hash, content);
+                }
+                else
+                {
+                    std::vector<char> toCheck = storage.loadFile(hash);
+                    if (toCheck != content)
+                    {
+                        throw std::runtime_error("Same hash diffrent file");
+                    }
+                }
+                archiveContents[std::filesystem::relative(entry.path(), dir).string()] = hash; // realtive path of file in directory : file hash,
+                                                                                               //  which is the name of the compressed file in data
             }
         }
 
-     
-        archiveData[archiveName] = archiveContents; //archive name : [file relative paths : hash]
+        archiveData[archiveName] = archiveContents; // archive name : [file relative paths : hash]
     }
 
- 
-    void extractArchive(const std::string& archiveName, const std::string& targetPath, const std::vector<std::string>& paths = {}) {
-        if (!archiveData.contains(archiveName)) {
+    void extractArchive(const std::string &archiveName, const std::string &targetPath, const std::vector<std::string> &paths = {})
+    {
+        if (!archiveData.contains(archiveName))
+        {
             throw std::runtime_error("Archive not found");
         }
 
-        const auto& archiveContents = archiveData[archiveName]; //get the archive we need
+        const auto &archiveContents = archiveData[archiveName]; // get the archive we need
 
-      
         std::vector<std::string> filesToExtract;
-        if (paths.empty()) {   //no argument of relative paths passed, we add all the elements,else only the specified ones
-            for (const auto& [relativePath, _] : archiveContents.items()) {
+        if (paths.empty())
+        { // no argument of relative paths passed, we add all the elements,else only the specified ones
+            for (const auto &[relativePath, _] : archiveContents.items())
+            {
                 filesToExtract.push_back(relativePath);
             }
-        } else {
+        }
+        else
+        {
             filesToExtract = paths;
         }
 
-        for (const auto& relativePath : filesToExtract) {
-            if (!archiveContents.contains(relativePath)) {
+        for (const auto &relativePath : filesToExtract)
+        {
+            if (!archiveContents.contains(relativePath))
+            {
                 throw std::runtime_error("File path not found in archive: " + relativePath);
             }
 
-            std::string hash = archiveContents[relativePath]; //get the hash with relative path
-            std::vector<char> content = storage.loadFile(hash); //we decompress the file with this hash 
+            std::string hash = archiveContents[relativePath];   // get the hash with relative path
+            std::vector<char> content = storage.loadFile(hash); // we decompress the file with this hash
 
-            //write the file at the correct relative path from the target path
-            std::filesystem::path outputPath = std::filesystem::path(targetPath) / relativePath; 
-            //get the path to the file and creates the directories holding it
+            // write the file at the correct relative path from the target path
+            std::filesystem::path outputPath = std::filesystem::path(targetPath) / relativePath;
+            // get the path to the file and creates the directories holding it
             std::filesystem::create_directories(outputPath.parent_path());
-            //create it
+            // create it
             std::ofstream outFile(outputPath, std::ios::binary);
             outFile.write(content.data(), content.size());
             outFile.close();
         }
     }
 
-    void saveMetadata() {
+    void saveMetadata()
+    {
         std::ofstream file(metadataFile, std::ios::binary);
         file << archiveData.dump(4);
         file.close();
     }
 
-   
-    void loadMetadata() {
+    void loadMetadata()
+    {
         std::ifstream file(metadataFile, std::ios::binary);
-        if (file.is_open()) {
+        if (file.is_open())
+        {
             file >> archiveData;
         }
         file.close();
@@ -232,20 +260,23 @@ public:
 };
 
 int main(int argc, char *argv[])
-{
-    try {
-        if (argc < 2) {
+{   
+    try
+    {
+        if (argc < 2)
+        {
             std::cerr << "Usage: backup.exe <command> [<args>]\n";
             return 1;
         }
 
-        std::string command = argv[1],storageData="metaData.json";
+        std::string command = argv[1], storageData = "metaData.json";
         Storage storage;
         storage.loadFromFile(storageData);
         ArchiveManager archiveManager(storage);
-
-        if (command == "create") {
-            if (argc < 4) {
+        if (command == "create")
+        {
+            if (argc < 4)
+            {
                 std::cerr << "Usage: backup.exe create [hash-only] <name> <directory>+\n";
                 return 1;
             }
@@ -253,23 +284,25 @@ int main(int argc, char *argv[])
             bool hashOnly = false;
             int nameIndex = 2;
 
-            if (std::string(argv[2]) == "hash-only") {
+            if (std::string(argv[2]) == "hash-only")
+            {
                 hashOnly = true;
                 nameIndex = 3;
             }
 
             std::string archiveName = argv[nameIndex];
             std::vector<std::string> directories;
-            for (int i = nameIndex + 1; i < argc; ++i) {
+            for (int i = nameIndex + 1; i < argc; ++i)
+            {
                 directories.push_back(argv[i]);
             }
-
-            // Handle hash-only if needed (not implemented in this version)
-            archiveManager.createArchive(archiveName, directories);
+            archiveManager.createArchive(archiveName, directories, hashOnly);
             std::cout << "Archive '" << archiveName << "' created successfully.\n";
-
-        } else if (command == "extract") {
-            if (argc < 4) {
+        }
+        else if (command == "extract")
+        {
+            if (argc < 4)
+            {
                 std::cerr << "Usage: backup.exe extract <name> <target-path> [<archive-path>*]\n";
                 return 1;
             }
@@ -278,20 +311,21 @@ int main(int argc, char *argv[])
             std::string targetPath = argv[3];
             std::vector<std::string> paths;
 
-            for (int i = 4; i < argc; ++i) {
+            for (int i = 4; i < argc; ++i)
+            {
                 paths.push_back(argv[i]);
             }
 
             archiveManager.extractArchive(archiveName, targetPath, paths);
             std::cout << "Archive '" << archiveName << "' extracted to '" << targetPath << "' successfully.\n";
-            
         }
         storage.saveToFile(storageData);
-        }
-        catch (const std::exception& e) {
+    }
+    catch (const std::exception &e)
+    {
         std::cerr << "Error: " << e.what() << "\n";
         return 1;
     }
-        
+
     return 0;
 }
