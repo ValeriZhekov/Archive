@@ -240,6 +240,109 @@ public:
             outFile.close();
         }
     }
+    void checkArchive(const std::string &archiveName, const std::string &targetPath)
+{
+    if (!archiveData.contains(archiveName))
+    {
+        throw std::runtime_error("Archive not found");
+    }
+
+    const auto &archiveContents = archiveData[archiveName]; //data of archive to check
+    std::unordered_map<std::string, std::string> fsFiles; //relative path -> hash of folder
+
+    // going through all the files in the folder and saving info in fsFiles
+    for (const auto &entry : std::filesystem::recursive_directory_iterator(targetPath))
+    {
+        if (!entry.is_regular_file())
+            continue;
+
+        std::ifstream file(entry.path(), std::ios::binary);
+        std::vector<char> content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        file.close();
+
+        std::string hash = computeHash(content);
+        std::string relativePath = std::filesystem::relative(entry.path(), targetPath).string(); //relative path in folder
+        fsFiles[relativePath] = hash; 
+    }
+
+    // check if files in archive are missing or changed in folder
+    for (const auto &[relativePath, hash] : archiveContents.items())
+    {
+        if (fsFiles.find(relativePath) == fsFiles.end())
+        {
+            std::cout << "Missing file in filesystem: " << relativePath << "\n";
+        }
+        else if (fsFiles[relativePath] != hash)
+        {
+            std::cout << "Changed content: " << relativePath << "\n";
+        }
+
+        fsFiles.erase(relativePath); // remove files that we checked
+    }
+
+    // go through all the files in the directory that werent in the archive
+    for (const auto &[relativePath, hash] : fsFiles)
+    {
+        std::cout << "New or missing in archive: " << relativePath << "\n";
+    }
+}
+void updateArchive(const std::string &archiveName, const std::vector<std::string> &directories, bool hashOnly)
+{
+    if (!archiveData.contains(archiveName))
+    {
+        throw std::runtime_error("Archive not found");
+    }
+
+    auto &archiveContents = archiveData[archiveName]; // archive data
+    std::unordered_map<std::string, std::string> fsFiles; // realtive path -> hash in folders
+
+   
+    for (const auto &dir : directories) //go through all folders
+    {
+        for (const auto &entry : std::filesystem::recursive_directory_iterator(dir)) //through all files in them
+        {
+            if (!entry.is_regular_file())
+                continue;
+
+            std::ifstream file(entry.path(), std::ios::binary);
+            std::vector<char> content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+            file.close();
+
+            std::string hash = computeHash(content);
+            std::string relativePath = std::filesystem::relative(entry.path(), dir).string();
+            fsFiles[relativePath] = hash;
+
+            
+            if (!archiveContents.contains(relativePath)) //if not in archive we add it
+            {
+                std::cout << "Adding new file: " << relativePath << "\n";
+                    storage.addFile(hash, content);
+                archiveContents[relativePath] = hash;
+            }
+            else if (archiveContents[relativePath] != hash) //if there is a file with the same path but diffrent content we set the new content
+            {
+                std::cout << "Updating changed file: " << relativePath << "\n";
+                    storage.addFile(hash, content);
+                archiveContents[relativePath] = hash;
+            }
+        }
+    }
+
+    for (auto it = archiveContents.begin(); it != archiveContents.end();)
+    {
+        if (fsFiles.find(it.key()) == fsFiles.end()) //if archive file is not in files
+        {
+            std::cout << "Removing deleted file from archive: " << it.key() << "\n";
+            it = archiveContents.erase(it); //erase returns iter to next element
+        }
+        else
+        {
+            ++it;
+        }
+    }
+
+    std::cout << "Archive '" << archiveName << "' updated successfully.\n";
+}
 
     void saveMetadata()
     {
@@ -319,8 +422,64 @@ int main(int argc, char *argv[])
             archiveManager.extractArchive(archiveName, targetPath, paths);
             std::cout << "Archive '" << archiveName << "' extracted to '" << targetPath << "' successfully.\n";
         }
+        else if (command == "check")
+{
+    if (argc < 4)
+    {
+        std::cerr << "Usage: backup.exe check <name> <target-path> [<archive-path>*]\n";
+        return 1;
+    }
+
+    std::string archiveName = argv[2];
+    std::string targetPath = argv[3];
+    
+    try
+    {
+        archiveManager.checkArchive(archiveName, targetPath);
+    }
+    catch (const std::exception &e)
+    {
+        std::cerr << "Error during check: " << e.what() << "\n";
+        return 1;
+    }
+}
+else if (command == "update")
+{
+    if (argc < 4)
+    {
+        std::cerr << "Usage: backup.exe update [hash-only] <name> <directory>+\n";
+        return 1;
+    }
+
+    bool hashOnly = false;
+    int nameIndex = 2;
+
+    if (std::string(argv[2]) == "hash-only")
+    {
+        hashOnly = true;
+        nameIndex = 3;
+    }
+
+    std::string archiveName = argv[nameIndex];
+    std::vector<std::string> directories;
+    for (int i = nameIndex + 1; i < argc; ++i)
+    {
+        directories.push_back(argv[i]);
+    }
+
+    try
+    {
+        archiveManager.updateArchive(archiveName, directories, hashOnly);
+    }
+    catch (const std::exception &e)
+    {
+        std::cerr << "Error during update: " << e.what() << "\n";
+        return 1;
+    }
+}
         storage.saveToFile(storageData);
     }
+    
     catch (const std::exception &e)
     {
         std::cerr << "Error: " << e.what() << "\n";
